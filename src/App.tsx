@@ -27,6 +27,8 @@ const defaultPreset = presets[0];
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+type ParamRow = { label: string; value: string };
+
 const App = () => {
   const [mode, setMode] = useState<"encode" | "decode">("encode");
   const [chainId, setChainId] = useState<number>(chains[0].chainId);
@@ -39,7 +41,6 @@ const App = () => {
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [values, setValues] = useState<FormValue[]>([]);
 
-  const [tlEnabled, setTlEnabled] = useState(false);
   const [tlAction, setTlAction] = useState<"schedule" | "execute">("schedule");
   const [tlAddress, setTlAddress] = useState("");
   const [tlPredecessor, setTlPredecessor] = useState(ZERO_HASH);
@@ -48,10 +49,9 @@ const App = () => {
   const [tlValue, setTlValue] = useState("0");
 
   const [innerCalldata, setInnerCalldata] = useState("");
-  const [outerCalldata, setOuterCalldata] = useState("");
-  const [operationId, setOperationId] = useState("");
-  const [tlParams, setTlParams] = useState<Array<{ label: string; value: string }>>([]);
+
   const [decodeInput, setDecodeInput] = useState("");
+  const [decodeWrapped, setDecodeWrapped] = useState(true);
   const [innerRows, setInnerRows] = useState<DecodedRow[]>([]);
   const [outerRows, setOuterRows] = useState<DecodedRow[]>([]);
   const [decodedOpId, setDecodedOpId] = useState("");
@@ -86,9 +86,6 @@ const App = () => {
     setSelectedKey(entry.key);
     setValues(entry.inputs.map((param) => buildInitialValue(param)));
     setInnerCalldata("");
-    setOuterCalldata("");
-    setOperationId("");
-    setTlParams([]);
     setInnerRows([]);
     setOuterRows([]);
     setDecodedOpId("");
@@ -135,8 +132,8 @@ const App = () => {
     loadAbi(preset.abiJson);
   };
 
-  // Auto-load the bundled default preset on first render so the interface is
-  // usable without pasting or fetching an ABI.
+  // Auto-load the bundled default preset on first render so the vault interface
+  // is usable without pasting or fetching an ABI.
   useEffect(() => {
     if (defaultPreset) {
       loadAbi(defaultPreset.abiJson);
@@ -144,57 +141,14 @@ const App = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleGenerate = () => {
+  // Step 2: encode the vault function call into calldata.
+  const handleGenerateVault = () => {
     try {
       if (!selectedEntry) {
-        throw new Error("Load an ABI and select a function.");
-      }
-      if (!isAddress(address)) {
-        throw new FieldError("address", "Enter a valid target contract address.");
+        throw new Error("Select a vault function first.");
       }
       const inner = encodeCall(abiText, selectedEntry, values);
       setInnerCalldata(inner);
-      if (tlEnabled) {
-        if (!isAddress(tlAddress)) {
-          throw new FieldError("timelock", "Enter a valid Timelock address.");
-        }
-        const outer =
-          tlAction === "schedule"
-            ? encodeSchedule(address, tlValue, inner, tlPredecessor, tlSalt, tlDelay)
-            : encodeExecute(address, tlValue, inner, tlPredecessor, tlSalt);
-        setOuterCalldata(outer);
-        // The operation id ties schedule and execute together. It depends only
-        // on (target, value, data, predecessor, salt) — NOT the delay — so the
-        // same value must appear when you later encode the matching execute.
-        setOperationId(
-          hashTimelockOperation(address, tlValue, inner, tlPredecessor, tlSalt),
-        );
-        // Broken-out timelock function arguments, in ABI order, so each can be
-        // pasted field-by-field into Safe's Transaction Builder. `data` is the
-        // inner calldata generated above.
-        setTlParams(
-          tlAction === "schedule"
-            ? [
-                { label: "target", value: address },
-                { label: "value", value: tlValue },
-                { label: "data", value: inner },
-                { label: "predecessor", value: tlPredecessor },
-                { label: "salt", value: tlSalt },
-                { label: "delay", value: tlDelay },
-              ]
-            : [
-                { label: "target", value: address },
-                { label: "value", value: tlValue },
-                { label: "data", value: inner },
-                { label: "predecessor", value: tlPredecessor },
-                { label: "salt", value: tlSalt },
-              ],
-        );
-      } else {
-        setOuterCalldata("");
-        setOperationId("");
-        setTlParams([]);
-      }
       setError("");
     } catch (caught) {
       setError(
@@ -205,16 +159,49 @@ const App = () => {
     }
   };
 
+  // Step 3: derive the Timelock schedule/execute arguments from the vault
+  // calldata. Recomputed live so editing salt/delay/etc. updates immediately.
+  // The Timelock argument `target` is the vault address; the Timelock contract
+  // itself is the Safe transaction's "To", not an encoded argument.
+  const timelockOutput = useMemo(() => {
+    if (mode !== "encode" || !innerCalldata) {
+      return null;
+    }
+    if (!isAddress(address)) {
+      return { error: "Enter a valid vault address in step 1.", params: [] as ParamRow[], outer: "", opId: "" };
+    }
+    try {
+      const outer =
+        tlAction === "schedule"
+          ? encodeSchedule(address, tlValue, innerCalldata, tlPredecessor, tlSalt, tlDelay)
+          : encodeExecute(address, tlValue, innerCalldata, tlPredecessor, tlSalt);
+      const opId = hashTimelockOperation(address, tlValue, innerCalldata, tlPredecessor, tlSalt);
+      const params: ParamRow[] = [
+        { label: "target", value: address },
+        { label: "value", value: tlValue },
+        { label: "data", value: innerCalldata },
+        { label: "predecessor", value: tlPredecessor },
+        { label: "salt", value: tlSalt },
+      ];
+      if (tlAction === "schedule") {
+        params.push({ label: "delay", value: tlDelay });
+      }
+      return { outer, opId, params, error: "" };
+    } catch (caught) {
+      return { outer: "", opId: "", params: [] as ParamRow[], error: errorText(caught) };
+    }
+  }, [mode, innerCalldata, address, tlAction, tlValue, tlPredecessor, tlSalt, tlDelay]);
+
   const handleDecode = () => {
     try {
       if (!selectedEntry) {
-        throw new Error("Load an ABI and select the expected function.");
+        throw new Error("Select the vault function this calldata calls.");
       }
       const input = decodeInput.trim();
       if (!input) {
         throw new Error("Paste calldata to decode.");
       }
-      if (tlEnabled) {
+      if (decodeWrapped) {
         const outer = decodeTimelock(tlAction, input);
         const innerData = String(outer.getValue("data"));
         const outerLabels =
@@ -231,8 +218,6 @@ const App = () => {
           })),
         );
         setInnerRows(decodeToRows(abiText, selectedEntry, innerData));
-        // Recompute the operation id from the decoded fields so a verifier can
-        // confirm a schedule and its execute reference the same operation.
         setDecodedOpId(
           hashTimelockOperation(
             String(outer.getValue("target")),
@@ -267,18 +252,44 @@ const App = () => {
           <p className="eyebrow">Safe Ops</p>
           <h1>Timelock calldata tool</h1>
           <p className="hero-copy">
-            Encode and verify Safe multisig calldata for any contract, with an
-            optional OpenZeppelin Timelock wrapper. Everything runs in your
-            browser.
+            Encode a vault call, then wrap it in an OpenZeppelin Timelock
+            schedule / execute — with every field laid out to paste into Safe's
+            Transaction Builder. Everything runs in your browser.
           </p>
         </div>
       </header>
 
+      <div className="mode-row">
+        <div className="segmented">
+          <button
+            type="button"
+            className={mode === "encode" ? "active" : ""}
+            onClick={() => {
+              setMode("encode");
+              setError("");
+            }}
+          >
+            Encode
+          </button>
+          <button
+            type="button"
+            className={mode === "decode" ? "active" : ""}
+            onClick={() => {
+              setMode("decode");
+              setError("");
+            }}
+          >
+            Decode / verify
+          </button>
+        </div>
+      </div>
+
       <main className="flow-layout">
+        {/* Section 1: chain + vault address */}
         <section className="panel flow-panel">
           <div className="section-heading">
-            <h2>1. Chain &amp; contract</h2>
-            <p>Chain selects the explorer endpoint. Addresses are yours to enter.</p>
+            <h2>1. Chain &amp; vault</h2>
+            <p>Chain selects the explorer endpoint. Enter the vault address.</p>
           </div>
           <div className="chain-list">
             {chains.map((item) => (
@@ -294,12 +305,15 @@ const App = () => {
             ))}
           </div>
           <label className="field field-full">
-            <span>Target contract address</span>
+            <span>Vault address</span>
             <input
               value={address}
               onChange={(event) => setAddress(event.target.value)}
-              placeholder="0x..."
+              placeholder="0x… (the contract the Timelock will call)"
             />
+            <small>
+              This becomes the Timelock call's <code>target</code> argument.
+            </small>
           </label>
           <div className="field-grid compact">
             <label className="field">
@@ -333,12 +347,14 @@ const App = () => {
           </div>
         </section>
 
+        {/* Section 2: vault ABI & function */}
         <section className="panel flow-panel">
           <div className="section-heading">
-            <h2>2. ABI &amp; function</h2>
+            <h2>2. Vault ABI &amp; function</h2>
             <p>
               A bundled preset is loaded by default. Pick another preset, or
-              paste / fetch an ABI to override it.
+              paste / fetch an ABI to override it. Then choose a function and
+              fill its parameters.
             </p>
           </div>
           {presets.length > 0 ? (
@@ -359,9 +375,9 @@ const App = () => {
             </div>
           ) : null}
           <label className="field field-full">
-            <span>Contract ABI (JSON)</span>
+            <span>Vault ABI (JSON)</span>
             <textarea
-              rows={6}
+              rows={5}
               value={abiText}
               onChange={(event) => setAbiText(event.target.value)}
               placeholder='[{"type":"function", ...}]'
@@ -390,48 +406,57 @@ const App = () => {
               <code>{selectedEntry.signature}</code>
             </p>
           ) : null}
+
+          {mode === "encode" ? (
+            <div className="compact-stack">
+              {selectedEntry && selectedEntry.inputs.length > 0 ? (
+                <div className="form-grid compact">
+                  {selectedEntry.inputs.map((param, index) => (
+                    <ParamField
+                      key={`${param.name || param.type}-${index}`}
+                      param={param}
+                      value={values[index] ?? ""}
+                      onChange={(next) => setValueAt(index, next)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="primary-action compact-action"
+                onClick={handleGenerateVault}
+              >
+                Generate vault calldata
+              </button>
+              <CopyableField
+                label="Vault calldata (data)"
+                value={innerCalldata}
+                emptyHint="Fill the parameters and generate."
+                onCopy={handleCopy}
+              />
+            </div>
+          ) : (
+            <p className="empty-state">
+              Select the function this calldata is expected to call, then paste
+              the calldata in step 3.
+            </p>
+          )}
         </section>
 
-        <section className="panel flow-panel">
-          <div className="mode-row">
-            <div className="segmented">
-              <button
-                type="button"
-                className={mode === "encode" ? "active" : ""}
-                onClick={() => {
-                  setMode("encode");
-                  setError("");
-                }}
-              >
-                Encode
-              </button>
-              <button
-                type="button"
-                className={mode === "decode" ? "active" : ""}
-                onClick={() => {
-                  setMode("decode");
-                  setError("");
-                }}
-              >
-                Decode
-              </button>
+        {/* Section 3: timelock */}
+        {mode === "encode" ? (
+          <section className="panel flow-panel">
+            <div className="section-heading">
+              <h2>3. Timelock — {tlAction}</h2>
+              <p>
+                Fields to paste into Safe. <strong>To</strong> = the Timelock
+                contract; the arguments below are the {tlAction} call.
+              </p>
             </div>
-            <label className="field">
-              <span>Timelock wrapper</span>
-              <select
-                value={String(tlEnabled)}
-                onChange={(event) => setTlEnabled(event.target.value === "true")}
-              >
-                <option value="false">Direct (no timelock)</option>
-                <option value="true">OZ TimelockController</option>
-              </select>
-            </label>
-          </div>
 
-          {tlEnabled ? (
             <div className="timelock-box">
               <div className="timelock-header">
-                <h3>Timelock</h3>
+                <h3>Timelock parameters</h3>
                 <div className="segmented">
                   <button
                     type="button"
@@ -451,19 +476,20 @@ const App = () => {
               </div>
               <div className="field-grid compact">
                 <label className="field">
-                  <span>Timelock address (send-to)</span>
+                  <span>Timelock contract (Safe → To)</span>
                   <input
                     value={tlAddress}
                     onChange={(event) => setTlAddress(event.target.value)}
-                    placeholder="0x..."
+                    placeholder="0x…"
                   />
+                  <small>Not an argument — this is the Safe transaction target.</small>
                 </label>
                 <label className="field">
-                  <span>Value (wei)</span>
+                  <span>value (wei)</span>
                   <input value={tlValue} onChange={(event) => setTlValue(event.target.value)} />
                 </label>
                 <label className="field">
-                  <span>Predecessor</span>
+                  <span>predecessor</span>
                   <input
                     value={tlPredecessor}
                     onChange={(event) => setTlPredecessor(event.target.value)}
@@ -471,60 +497,121 @@ const App = () => {
                   />
                 </label>
                 <label className="field">
-                  <span>Salt</span>
+                  <span>salt</span>
                   <input
                     value={tlSalt}
                     onChange={(event) => setTlSalt(event.target.value)}
                     placeholder={ZERO_HASH}
                   />
                   <small>
-                    Must be identical for schedule and execute — different salt
-                    (or predecessor/target/value/data) means a different
-                    operation, and execute reverts.
+                    Identical for schedule and execute — a different salt (or
+                    predecessor/target/value/data) is a different operation and
+                    execute reverts.
                   </small>
                 </label>
                 {tlAction === "schedule" ? (
                   <label className="field">
-                    <span>Delay (seconds)</span>
+                    <span>delay (seconds)</span>
                     <input value={tlDelay} onChange={(event) => setTlDelay(event.target.value)} />
-                    <small>Must be ≥ the TimelockController's minDelay.</small>
+                    <small>Must be ≥ the Timelock's minDelay.</small>
                   </label>
                 ) : null}
               </div>
             </div>
-          ) : null}
 
-          {mode === "encode" ? (
-            <div className="compact-stack">
-              <div className="form-grid compact">
-                {selectedEntry
-                  ? selectedEntry.inputs.map((param, index) => (
-                      <ParamField
-                        key={`${param.name || param.type}-${index}`}
-                        param={param}
-                        value={values[index] ?? ""}
-                        onChange={(next) => setValueAt(index, next)}
+            {!innerCalldata ? (
+              <p className="empty-state">
+                Generate the vault calldata in step 2 first — it fills the{" "}
+                <code>data</code> argument below.
+              </p>
+            ) : timelockOutput?.error ? (
+              <p className="error-text">{timelockOutput.error}</p>
+            ) : timelockOutput ? (
+              <div className="result-layout">
+                <div className="output-card compact-output">
+                  <div className="output-head">
+                    <h4>{tlAction}(…) arguments — paste into Safe</h4>
+                    <p>One field at a time in the Transaction Builder.</p>
+                  </div>
+                  <div className="output-meta">
+                    <span>To (Timelock contract)</span>
+                    <code>{tlAddress || "enter the Timelock address above"}</code>
+                  </div>
+                  <div className="tl-params">
+                    {timelockOutput.params.map((param) => (
+                      <CopyableField
+                        key={param.label}
+                        label={param.label}
+                        value={param.value}
+                        onCopy={handleCopy}
+                        mono
                       />
-                    ))
-                  : null}
+                    ))}
+                  </div>
+                </div>
+
+                <div className="output-card compact-output">
+                  <div className="output-head">
+                    <h4>Full {tlAction} calldata</h4>
+                    <p>Alternative: paste one blob as raw hex data.</p>
+                  </div>
+                  <CopyableField
+                    label="calldata"
+                    value={timelockOutput.outer}
+                    onCopy={handleCopy}
+                  />
+                  <div className="op-id-row">
+                    <span>Operation ID</span>
+                    <code>{timelockOutput.opId}</code>
+                    <small>
+                      Independent of delay. The paired execute must reproduce
+                      this exact ID or it reverts.
+                    </small>
+                  </div>
+                </div>
               </div>
-              <button
-                type="button"
-                className="primary-action compact-action"
-                onClick={handleGenerate}
-              >
-                Generate calldata
-              </button>
+            ) : null}
+          </section>
+        ) : (
+          <section className="panel flow-panel">
+            <div className="section-heading">
+              <h2>3. Decode / verify calldata</h2>
+              <p>Paste calldata to confirm what it does before signing.</p>
             </div>
-          ) : (
             <div className="compact-stack">
+              <div className="field-grid compact">
+                <label className="field">
+                  <span>Calldata kind</span>
+                  <select
+                    value={decodeWrapped ? "wrapped" : "direct"}
+                    onChange={(event) => setDecodeWrapped(event.target.value === "wrapped")}
+                  >
+                    <option value="wrapped">Timelock schedule/execute</option>
+                    <option value="direct">Direct vault calldata</option>
+                  </select>
+                </label>
+                {decodeWrapped ? (
+                  <label className="field">
+                    <span>Timelock action</span>
+                    <select
+                      value={tlAction}
+                      onChange={(event) =>
+                        setTlAction(event.target.value as "schedule" | "execute")
+                      }
+                    >
+                      <option value="schedule">schedule</option>
+                      <option value="execute">execute</option>
+                    </select>
+                  </label>
+                ) : null}
+              </div>
               <label className="field field-full">
-                <span>{tlEnabled ? "Timelock calldata" : "Direct calldata"}</span>
+                <span>{decodeWrapped ? "Timelock calldata" : "Vault calldata"}</span>
                 <textarea
                   rows={6}
                   value={decodeInput}
                   onChange={(event) => setDecodeInput(event.target.value)}
-                  placeholder="0x..."
+                  placeholder="0x…"
                 />
               </label>
               <button
@@ -534,73 +621,38 @@ const App = () => {
               >
                 Decode calldata
               </button>
-            </div>
-          )}
 
-          {error ? <p className="error-text">{error}</p> : null}
-        </section>
-
-        <section className="panel flow-panel">
-          <div className="section-heading">
-            <h2>3. {mode === "encode" ? "Output" : "Decoded"}</h2>
-          </div>
-          {mode === "encode" ? (
-            <div className="result-layout">
-              <OutputCard
-                title={tlEnabled ? "1. Inner calldata (DEXVaultV1)" : "Direct calldata"}
-                target={address || "target contract"}
-                calldata={innerCalldata}
-                onCopy={handleCopy}
-              />
-              {tlEnabled && tlParams.length > 0 ? (
-                <TimelockParamsCard
-                  action={tlAction}
-                  timelockAddress={tlAddress || "timelock"}
-                  params={tlParams}
-                  onCopy={handleCopy}
-                />
-              ) : null}
-              {tlEnabled ? (
-                <OutputCard
-                  title={`3. Outer ${tlAction} calldata`}
-                  target={tlAddress || "timelock"}
-                  calldata={outerCalldata}
-                  onCopy={handleCopy}
-                />
-              ) : null}
-              {tlEnabled && operationId ? (
-                <OperationIdCard operationId={operationId} onCopy={handleCopy} />
-              ) : null}
-            </div>
-          ) : (
-            <div className="result-layout">
-              {tlEnabled ? (
+              <div className="result-layout">
+                {decodeWrapped ? (
+                  <div className="subpanel compact-panel">
+                    <div className="section-heading compact">
+                      <h3>Outer timelock call</h3>
+                    </div>
+                    <DecodedRows rows={outerRows} />
+                    {decodedOpId ? (
+                      <div className="op-id-row">
+                        <span>Operation ID</span>
+                        <code>{decodedOpId}</code>
+                        <small>
+                          Must match the operation ID from the paired schedule /
+                          execute.
+                        </small>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="subpanel compact-panel">
                   <div className="section-heading compact">
-                    <h3>Outer timelock call</h3>
+                    <h3>{decodeWrapped ? "Inner vault call" : "Decoded parameters"}</h3>
                   </div>
-                  <DecodedRows rows={outerRows} />
-                  {decodedOpId ? (
-                    <div className="op-id-row">
-                      <span>Operation ID</span>
-                      <code>{decodedOpId}</code>
-                      <small>
-                        Must match the operation ID from the paired schedule /
-                        execute.
-                      </small>
-                    </div>
-                  ) : null}
+                  <DecodedRows rows={innerRows} />
                 </div>
-              ) : null}
-              <div className="subpanel compact-panel">
-                <div className="section-heading compact">
-                  <h3>{tlEnabled ? "Inner business call" : "Decoded parameters"}</h3>
-                </div>
-                <DecodedRows rows={innerRows} />
               </div>
             </div>
-          )}
-        </section>
+          </section>
+        )}
+
+        {error ? <p className="error-text">{error}</p> : null}
       </main>
 
       {copyNotice ? <div className="copy-toast">{copyNotice}</div> : null}
@@ -608,114 +660,34 @@ const App = () => {
   );
 };
 
-const TimelockParamsCard = ({
-  action,
-  timelockAddress,
-  params,
+const CopyableField = ({
+  label,
+  value,
   onCopy,
+  emptyHint,
+  mono,
 }: {
-  action: "schedule" | "execute";
-  timelockAddress: string;
-  params: Array<{ label: string; value: string }>;
+  label: string;
+  value: string;
   onCopy: (value: string, label: string) => Promise<void>;
+  emptyHint?: string;
+  mono?: boolean;
 }) => (
-  <div className="output-card compact-output">
-    <div className="output-head">
-      <h4>2. Timelock {action} parameters</h4>
-      <p>Paste each field into Safe's Transaction Builder.</p>
-    </div>
-    <div className="output-meta">
-      <span>Contract to call</span>
-      <code>{timelockAddress}</code>
-    </div>
-    <div className="tl-params">
-      {params.map((param) => (
-        <div className="tl-param-row" key={param.label}>
-          <div className="meta-head">
-            <span>{param.label}</span>
-            <button
-              type="button"
-              className="mini-button icon-button"
-              onClick={() => onCopy(param.value, `${param.label} copied`)}
-            >
-              <CopyIcon />
-              Copy
-            </button>
-          </div>
-          <pre>{param.value}</pre>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
-const OperationIdCard = ({
-  operationId,
-  onCopy,
-}: {
-  operationId: string;
-  onCopy: (value: string, label: string) => Promise<void>;
-}) => (
-  <div className="output-card compact-output">
-    <div className="output-head">
-      <h4>Operation ID</h4>
-    </div>
-    <div className="output-meta">
-      <div className="meta-head">
-        <span>hashOperation(target, value, data, predecessor, salt)</span>
+  <div className={mono ? "tl-param-row" : "output-meta"}>
+    <div className="meta-head">
+      <span>{label}</span>
+      {value ? (
         <button
           type="button"
           className="mini-button icon-button"
-          onClick={() => onCopy(operationId, "Operation ID copied")}
+          onClick={() => onCopy(value, `${label} copied`)}
         >
           <CopyIcon />
           Copy
         </button>
-      </div>
-      <pre>{operationId}</pre>
+      ) : null}
     </div>
-    <p className="operation-copy">
-      Independent of delay. The paired execute must reproduce this exact ID
-      (same target, value, data, predecessor, salt) or it reverts.
-    </p>
-  </div>
-);
-
-const OutputCard = ({
-  title,
-  target,
-  calldata,
-  onCopy,
-}: {
-  title: string;
-  target: string;
-  calldata: string;
-  onCopy: (value: string, label: string) => Promise<void>;
-}) => (
-  <div className="output-card compact-output">
-    <div className="output-head">
-      <h4>{title}</h4>
-    </div>
-    <div className="output-meta">
-      <span>Target</span>
-      <code>{target}</code>
-    </div>
-    <div className="output-meta">
-      <div className="meta-head">
-        <span>Calldata</span>
-        {calldata ? (
-          <button
-            type="button"
-            className="mini-button icon-button"
-            onClick={() => onCopy(calldata, "Calldata copied")}
-          >
-            <CopyIcon />
-            Copy
-          </button>
-        ) : null}
-      </div>
-      <pre>{calldata || "Fill the form and generate calldata."}</pre>
-    </div>
+    <pre>{value || emptyHint || "—"}</pre>
   </div>
 );
 
