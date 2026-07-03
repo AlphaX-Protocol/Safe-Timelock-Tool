@@ -383,6 +383,23 @@ pre {
   gap: 10px;
 }
 
+.preset-row {
+  display: grid;
+  gap: 8px;
+}
+
+.preset-row > span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 input,
 select,
 textarea {

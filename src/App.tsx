@@ -18,9 +18,11 @@ import {
   encodeSchedule,
 } from "./lib/timelock";
 import { fetchAbi } from "./lib/explorer";
+import { presets } from "./config/presets";
 import { ParamField } from "./components/ParamField";
 
 const STORAGE_KEY = "safeTimelockExplorerApiKey";
+const defaultPreset = presets[0];
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -31,7 +33,7 @@ const App = () => {
     () => localStorage.getItem(STORAGE_KEY) ?? "",
   );
   const [address, setAddress] = useState("");
-  const [abiText, setAbiText] = useState("");
+  const [abiText, setAbiText] = useState(defaultPreset?.abiJson ?? "");
   const [entries, setEntries] = useState<FunctionEntry[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [values, setValues] = useState<FormValue[]>([]);
@@ -120,6 +122,20 @@ const App = () => {
       setFetching(false);
     }
   };
+
+  const loadPreset = (preset: (typeof presets)[number]) => {
+    setAbiText(preset.abiJson);
+    loadAbi(preset.abiJson);
+  };
+
+  // Auto-load the bundled default preset on first render so the interface is
+  // usable without pasting or fetching an ABI.
+  useEffect(() => {
+    if (defaultPreset) {
+      loadAbi(defaultPreset.abiJson);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleGenerate = () => {
     try {
@@ -272,8 +288,28 @@ const App = () => {
         <section className="panel flow-panel">
           <div className="section-heading">
             <h2>2. ABI &amp; function</h2>
-            <p>Paste an ABI (or fetch it above), then pick a function.</p>
+            <p>
+              A bundled preset is loaded by default. Pick another preset, or
+              paste / fetch an ABI to override it.
+            </p>
           </div>
+          {presets.length > 0 ? (
+            <div className="preset-row">
+              <span>Presets</span>
+              <div className="preset-chips">
+                {presets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className="mini-button"
+                    onClick={() => loadPreset(preset)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <label className="field field-full">
             <span>Contract ABI (JSON)</span>
             <textarea
