@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { AbiCoder, keccak256 } from "ethers";
 import {
   ZERO_HASH,
   encodeSchedule,
   encodeExecute,
   decodeTimelock,
+  hashTimelockOperation,
 } from "./timelock";
 
 const TARGET = "0x0000000000000000000000000000000000000009";
@@ -27,5 +29,28 @@ describe("timelock", () => {
     const decoded = decodeTimelock("execute", data);
     expect(decoded[0]).toBe(TARGET);
     expect(decoded[2]).toBe(INNER);
+  });
+
+  it("hashTimelockOperation matches OZ keccak256(abi.encode(...))", () => {
+    // OZ TimelockController.hashOperation:
+    //   keccak256(abi.encode(target, value, data, predecessor, salt))
+    const expected = keccak256(
+      AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "bytes", "bytes32", "bytes32"],
+        [TARGET, 0n, INNER, ZERO_HASH, ZERO_HASH],
+      ),
+    );
+    expect(hashTimelockOperation(TARGET, "0", INNER, ZERO_HASH, ZERO_HASH)).toBe(
+      expected,
+    );
+  });
+
+  it("operation id changes with the salt (schedule and execute must match)", () => {
+    const saltA = ZERO_HASH;
+    const saltB =
+      "0x0000000000000000000000000000000000000000000000000000000000000001";
+    const idA = hashTimelockOperation(TARGET, "0", INNER, ZERO_HASH, saltA);
+    const idB = hashTimelockOperation(TARGET, "0", INNER, ZERO_HASH, saltB);
+    expect(idA).not.toBe(idB);
   });
 });

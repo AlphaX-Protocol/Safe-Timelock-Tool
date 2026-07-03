@@ -16,6 +16,7 @@ import {
   decodeTimelock,
   encodeExecute,
   encodeSchedule,
+  hashTimelockOperation,
 } from "./lib/timelock";
 import { fetchAbi } from "./lib/explorer";
 import { presets } from "./config/presets";
@@ -48,9 +49,11 @@ const App = () => {
 
   const [innerCalldata, setInnerCalldata] = useState("");
   const [outerCalldata, setOuterCalldata] = useState("");
+  const [operationId, setOperationId] = useState("");
   const [decodeInput, setDecodeInput] = useState("");
   const [innerRows, setInnerRows] = useState<DecodedRow[]>([]);
   const [outerRows, setOuterRows] = useState<DecodedRow[]>([]);
+  const [decodedOpId, setDecodedOpId] = useState("");
 
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -83,8 +86,10 @@ const App = () => {
     setValues(entry.inputs.map((param) => buildInitialValue(param)));
     setInnerCalldata("");
     setOuterCalldata("");
+    setOperationId("");
     setInnerRows([]);
     setOuterRows([]);
+    setDecodedOpId("");
   };
 
   const loadAbi = (text: string) => {
@@ -156,8 +161,15 @@ const App = () => {
             ? encodeSchedule(address, tlValue, inner, tlPredecessor, tlSalt, tlDelay)
             : encodeExecute(address, tlValue, inner, tlPredecessor, tlSalt);
         setOuterCalldata(outer);
+        // The operation id ties schedule and execute together. It depends only
+        // on (target, value, data, predecessor, salt) — NOT the delay — so the
+        // same value must appear when you later encode the matching execute.
+        setOperationId(
+          hashTimelockOperation(address, tlValue, inner, tlPredecessor, tlSalt),
+        );
       } else {
         setOuterCalldata("");
+        setOperationId("");
       }
       setError("");
     } catch (caught) {
@@ -195,8 +207,20 @@ const App = () => {
           })),
         );
         setInnerRows(decodeToRows(abiText, selectedEntry, innerData));
+        // Recompute the operation id from the decoded fields so a verifier can
+        // confirm a schedule and its execute reference the same operation.
+        setDecodedOpId(
+          hashTimelockOperation(
+            String(outer.getValue("target")),
+            (outer.getValue("value") as bigint).toString(),
+            innerData,
+            String(outer.getValue("predecessor")),
+            String(outer.getValue("salt")),
+          ),
+        );
       } else {
         setOuterRows([]);
+        setDecodedOpId("");
         setInnerRows(decodeToRows(abiText, selectedEntry, input));
       }
       setError("");
@@ -429,11 +453,17 @@ const App = () => {
                     onChange={(event) => setTlSalt(event.target.value)}
                     placeholder={ZERO_HASH}
                   />
+                  <small>
+                    Must be identical for schedule and execute — different salt
+                    (or predecessor/target/value/data) means a different
+                    operation, and execute reverts.
+                  </small>
                 </label>
                 {tlAction === "schedule" ? (
                   <label className="field">
                     <span>Delay (seconds)</span>
                     <input value={tlDelay} onChange={(event) => setTlDelay(event.target.value)} />
+                    <small>Must be ≥ the TimelockController's minDelay.</small>
                   </label>
                 ) : null}
               </div>
@@ -506,6 +536,9 @@ const App = () => {
                   onCopy={handleCopy}
                 />
               ) : null}
+              {tlEnabled && operationId ? (
+                <OperationIdCard operationId={operationId} onCopy={handleCopy} />
+              ) : null}
             </div>
           ) : (
             <div className="result-layout">
@@ -515,6 +548,16 @@ const App = () => {
                     <h3>Outer timelock call</h3>
                   </div>
                   <DecodedRows rows={outerRows} />
+                  {decodedOpId ? (
+                    <div className="op-id-row">
+                      <span>Operation ID</span>
+                      <code>{decodedOpId}</code>
+                      <small>
+                        Must match the operation ID from the paired schedule /
+                        execute.
+                      </small>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <div className="subpanel compact-panel">
@@ -532,6 +575,38 @@ const App = () => {
     </div>
   );
 };
+
+const OperationIdCard = ({
+  operationId,
+  onCopy,
+}: {
+  operationId: string;
+  onCopy: (value: string, label: string) => Promise<void>;
+}) => (
+  <div className="output-card compact-output">
+    <div className="output-head">
+      <h4>Operation ID</h4>
+    </div>
+    <div className="output-meta">
+      <div className="meta-head">
+        <span>hashOperation(target, value, data, predecessor, salt)</span>
+        <button
+          type="button"
+          className="mini-button icon-button"
+          onClick={() => onCopy(operationId, "Operation ID copied")}
+        >
+          <CopyIcon />
+          Copy
+        </button>
+      </div>
+      <pre>{operationId}</pre>
+    </div>
+    <p className="operation-copy">
+      Independent of delay. The paired execute must reproduce this exact ID
+      (same target, value, data, predecessor, salt) or it reverts.
+    </p>
+  </div>
+);
 
 const OutputCard = ({
   title,

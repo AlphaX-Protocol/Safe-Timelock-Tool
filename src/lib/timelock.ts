@@ -1,4 +1,4 @@
-import { Interface, type Result } from "ethers";
+import { AbiCoder, Interface, keccak256, type Result } from "ethers";
 
 export const ZERO_HASH = "0x" + "0".repeat(64);
 
@@ -47,3 +47,22 @@ export const decodeTimelock = (
   const abi = action === "schedule" ? SCHEDULE_ABI : EXECUTE_ABI;
   return new Interface(abi).decodeFunctionData(action, calldata.trim());
 };
+
+// Mirror of OZ TimelockController.hashOperation:
+//   keccak256(abi.encode(target, value, data, predecessor, salt))
+// The operation id ties a schedule to its execute: both calls MUST use the
+// same (target, value, data, predecessor, salt) or execute() reverts with
+// TimelockUnexpectedOperationState.
+export const hashTimelockOperation = (
+  target: string,
+  value: string,
+  data: string,
+  predecessor: string,
+  salt: string,
+): string =>
+  keccak256(
+    AbiCoder.defaultAbiCoder().encode(
+      ["address", "uint256", "bytes", "bytes32", "bytes32"],
+      [target, value, data, predecessor, salt],
+    ),
+  );
