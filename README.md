@@ -1,34 +1,28 @@
-# AssetVault Ops Web
+# Safe Timelock Tool
 
-Static React tool for production operators.
+A client-side tool for Safe multisig signers to **encode** calldata for any
+contract (from its ABI) and **decode/verify** calldata before signing, with an
+optional OpenZeppelin `TimelockController` wrapper.
 
-It supports:
+Everything runs in the browser. The only network request is an optional ABI
+fetch from a block explorer.
 
-- per-chain fixed `Vault Proxy`, `Admin Timelock`, and `Governance Timelock` targets
-- whitelisted multisig operations only
-- ABI JSON display for each operation
-- calldata encode for direct Safe actions
-- two-step calldata encode for `ADMIN_ROLE` and `UPGRADE_ROLE` actions through OpenZeppelin `TimelockController`
-- calldata decode for pasted direct or timelock calldata
-
-## Local development
+## Develop
 
 ```bash
 npm install
-npm run dev
+npm run dev      # start Vite dev server
+npm test         # run the lib unit tests (Vitest)
+npm run build    # typecheck + production build
 ```
 
-## Production build
+## How it works
 
-```bash
-npm run build
-```
+1. Pick a chain (drives the explorer endpoint).
+2. Enter the target contract address; paste its ABI or fetch it by address.
+3. Pick a writable function — the form is generated from its ABI types.
+4. Optionally enable the OZ Timelock wrapper (schedule/execute).
+5. Generate calldata, or switch to Decode to verify a calldata blob.
 
-## Vercel
-
-- Framework preset: `Vite`
-- Root directory: `ops/web`
-- Build command: `npm run build`
-- Output directory: `dist`
-
-Current timelock addresses in the app are placeholders and must be replaced after deployment.
+The explorer API key is stored only in your browser's `localStorage`; use
+"Clear key" to remove it.
