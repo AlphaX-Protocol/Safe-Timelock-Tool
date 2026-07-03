@@ -50,6 +50,7 @@ const App = () => {
   const [innerCalldata, setInnerCalldata] = useState("");
   const [outerCalldata, setOuterCalldata] = useState("");
   const [operationId, setOperationId] = useState("");
+  const [tlParams, setTlParams] = useState<Array<{ label: string; value: string }>>([]);
   const [decodeInput, setDecodeInput] = useState("");
   const [innerRows, setInnerRows] = useState<DecodedRow[]>([]);
   const [outerRows, setOuterRows] = useState<DecodedRow[]>([]);
@@ -87,6 +88,7 @@ const App = () => {
     setInnerCalldata("");
     setOuterCalldata("");
     setOperationId("");
+    setTlParams([]);
     setInnerRows([]);
     setOuterRows([]);
     setDecodedOpId("");
@@ -167,9 +169,31 @@ const App = () => {
         setOperationId(
           hashTimelockOperation(address, tlValue, inner, tlPredecessor, tlSalt),
         );
+        // Broken-out timelock function arguments, in ABI order, so each can be
+        // pasted field-by-field into Safe's Transaction Builder. `data` is the
+        // inner calldata generated above.
+        setTlParams(
+          tlAction === "schedule"
+            ? [
+                { label: "target", value: address },
+                { label: "value", value: tlValue },
+                { label: "data", value: inner },
+                { label: "predecessor", value: tlPredecessor },
+                { label: "salt", value: tlSalt },
+                { label: "delay", value: tlDelay },
+              ]
+            : [
+                { label: "target", value: address },
+                { label: "value", value: tlValue },
+                { label: "data", value: inner },
+                { label: "predecessor", value: tlPredecessor },
+                { label: "salt", value: tlSalt },
+              ],
+        );
       } else {
         setOuterCalldata("");
         setOperationId("");
+        setTlParams([]);
       }
       setError("");
     } catch (caught) {
@@ -523,14 +547,22 @@ const App = () => {
           {mode === "encode" ? (
             <div className="result-layout">
               <OutputCard
-                title={tlEnabled ? "Inner calldata" : "Direct calldata"}
+                title={tlEnabled ? "1. Inner calldata (DEXVaultV1)" : "Direct calldata"}
                 target={address || "target contract"}
                 calldata={innerCalldata}
                 onCopy={handleCopy}
               />
+              {tlEnabled && tlParams.length > 0 ? (
+                <TimelockParamsCard
+                  action={tlAction}
+                  timelockAddress={tlAddress || "timelock"}
+                  params={tlParams}
+                  onCopy={handleCopy}
+                />
+              ) : null}
               {tlEnabled ? (
                 <OutputCard
-                  title={`Outer ${tlAction} calldata`}
+                  title={`3. Outer ${tlAction} calldata`}
                   target={tlAddress || "timelock"}
                   calldata={outerCalldata}
                   onCopy={handleCopy}
@@ -575,6 +607,47 @@ const App = () => {
     </div>
   );
 };
+
+const TimelockParamsCard = ({
+  action,
+  timelockAddress,
+  params,
+  onCopy,
+}: {
+  action: "schedule" | "execute";
+  timelockAddress: string;
+  params: Array<{ label: string; value: string }>;
+  onCopy: (value: string, label: string) => Promise<void>;
+}) => (
+  <div className="output-card compact-output">
+    <div className="output-head">
+      <h4>2. Timelock {action} parameters</h4>
+      <p>Paste each field into Safe's Transaction Builder.</p>
+    </div>
+    <div className="output-meta">
+      <span>Contract to call</span>
+      <code>{timelockAddress}</code>
+    </div>
+    <div className="tl-params">
+      {params.map((param) => (
+        <div className="tl-param-row" key={param.label}>
+          <div className="meta-head">
+            <span>{param.label}</span>
+            <button
+              type="button"
+              className="mini-button icon-button"
+              onClick={() => onCopy(param.value, `${param.label} copied`)}
+            >
+              <CopyIcon />
+              Copy
+            </button>
+          </div>
+          <pre>{param.value}</pre>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
 const OperationIdCard = ({
   operationId,

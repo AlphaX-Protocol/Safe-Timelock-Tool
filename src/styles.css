@@ -400,6 +400,31 @@ pre {
   gap: 8px;
 }
 
+.tl-params {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tl-param-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(134, 209, 188, 0.2);
+  background: rgba(134, 209, 188, 0.05);
+}
+
+.tl-param-row > .meta-head {
+  margin-bottom: 0;
+}
+
+.tl-param-row > .meta-head span {
+  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  font-size: 0.82rem;
+  color: var(--accent-2);
+}
+
 .op-id-row {
   display: grid;
   gap: 6px;
