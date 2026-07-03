@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Interface } from "ethers";
-import { parseAbi, FieldError, buildInitialValue, toEncodeArg, encodeCall } from "./abi-form";
+import { parseAbi, FieldError, buildInitialValue, toEncodeArg, encodeCall, decodeToRows } from "./abi-form";
 
 const ABI = JSON.stringify([
   { type: "function", name: "foo", stateMutability: "nonpayable",
@@ -113,8 +113,6 @@ describe("validation", () => {
     expect(() => encodeCall(scalarAbi("bytes"), entry, ["0x123"])).toThrow(FieldError);
   });
 });
-
-import { decodeToRows } from "./abi-form";
 
 describe("decodeToRows", () => {
   it("decodes tuple[] + uint256 into labeled string rows", () => {

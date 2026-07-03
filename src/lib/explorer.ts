@@ -30,7 +30,12 @@ export const fetchAbi = async (
   } catch {
     return { ok: false, error: "Network error contacting explorer." };
   }
-  const json = (await response.json()) as { status?: string; result?: unknown };
+  let json: { status?: string; result?: unknown };
+  try {
+    json = (await response.json()) as { status?: string; result?: unknown };
+  } catch {
+    return { ok: false, error: "Unexpected response from explorer (not JSON)." };
+  }
   if (json.status === "1" && typeof json.result === "string") {
     return { ok: true, abi: json.result };
   }

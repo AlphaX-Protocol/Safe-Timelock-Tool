@@ -92,13 +92,18 @@ const App = () => {
 
   const handleFetch = async () => {
     setFetching(true);
-    const result = await fetchAbi(chainId, address, apiKey);
-    setFetching(false);
-    if (result.ok) {
-      setAbiText(result.abi);
-      loadAbi(result.abi);
-    } else {
-      setError(result.error);
+    try {
+      const result = await fetchAbi(chainId, address, apiKey);
+      if (result.ok) {
+        setAbiText(result.abi);
+        loadAbi(result.abi);
+      } else {
+        setError(result.error);
+      }
+    } catch (caught) {
+      setError(errorText(caught));
+    } finally {
+      setFetching(false);
     }
   };
 
@@ -145,7 +150,7 @@ const App = () => {
       }
       if (tlEnabled) {
         const outer = decodeTimelock(tlAction, input);
-        const innerData = String(outer[2]);
+        const innerData = String(outer.getValue("data"));
         const outerLabels =
           tlAction === "schedule"
             ? ["target", "value", "data", "predecessor", "salt", "delay"]
