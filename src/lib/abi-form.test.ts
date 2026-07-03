@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseAbi, FieldError } from "./abi-form";
+import { Interface } from "ethers";
+import { parseAbi, FieldError, buildInitialValue, toEncodeArg, encodeCall } from "./abi-form";
 
 const ABI = JSON.stringify([
   { type: "function", name: "foo", stateMutability: "nonpayable",
@@ -28,5 +29,87 @@ describe("parseAbi", () => {
     const e = new FieldError("a.b", "bad");
     expect(e.path).toBe("a.b");
     expect(e).toBeInstanceOf(Error);
+  });
+});
+
+const A1 = "0x0000000000000000000000000000000000000001";
+const A2 = "0x0000000000000000000000000000000000000002";
+
+const validatorsAbi = JSON.stringify([
+  { type: "function", name: "addValidators", stateMutability: "nonpayable", outputs: [],
+    inputs: [
+      { name: "validators", type: "tuple[]", components: [
+        { name: "signer", type: "address" },
+        { name: "power", type: "uint256" },
+      ] },
+      { name: "requiredPower", type: "uint256" },
+    ] },
+]);
+
+const scalarAbi = (type: string) => JSON.stringify([
+  { type: "function", name: "f", stateMutability: "nonpayable", outputs: [],
+    inputs: [{ name: "x", type }] },
+]);
+
+describe("buildInitialValue", () => {
+  it("scaffolds tuples, arrays, bool, and leaves", () => {
+    const entry = parseAbi(validatorsAbi)[0];
+    expect(buildInitialValue(entry.inputs[0])).toEqual([]); // dynamic array
+    expect(buildInitialValue(entry.inputs[1])).toBe(""); // uint256
+    const boolEntry = parseAbi(scalarAbi("bool"))[0];
+    expect(buildInitialValue(boolEntry.inputs[0])).toBe(false);
+  });
+});
+
+describe("encodeCall round-trip", () => {
+  it("encodes tuple[] + uint256 decodably", () => {
+    const entry = parseAbi(validatorsAbi)[0];
+    const values = [
+      [
+        { signer: A1, power: "10" },
+        { signer: A2, power: "20" },
+      ],
+      "30",
+    ];
+    const data = encodeCall(validatorsAbi, entry, values as never);
+    const decoded = new Interface(validatorsAbi).decodeFunctionData("addValidators", data);
+    expect(decoded[0][0].signer).toBe(A1);
+    expect(decoded[0][1].power).toBe(20n);
+    expect(decoded[1]).toBe(30n);
+  });
+
+  it("treats empty dynamic bytes as 0x", () => {
+    const entry = parseAbi(scalarAbi("bytes"))[0];
+    const data = encodeCall(scalarAbi("bytes"), entry, [""]);
+    const decoded = new Interface(scalarAbi("bytes")).decodeFunctionData("f", data);
+    expect(decoded[0]).toBe("0x");
+  });
+});
+
+describe("validation", () => {
+  it("rejects out-of-range uint8 with a pathed FieldError", () => {
+    const entry = parseAbi(scalarAbi("uint8"))[0];
+    try {
+      encodeCall(scalarAbi("uint8"), entry, ["256"]);
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(FieldError);
+      expect((e as FieldError).path).toBe("x");
+    }
+  });
+
+  it("rejects a bad address", () => {
+    const entry = parseAbi(scalarAbi("address"))[0];
+    expect(() => encodeCall(scalarAbi("address"), entry, ["0x123"])).toThrow(FieldError);
+  });
+
+  it("rejects a non-integer uint", () => {
+    const entry = parseAbi(scalarAbi("uint256"))[0];
+    expect(() => encodeCall(scalarAbi("uint256"), entry, ["1.5"])).toThrow(FieldError);
+  });
+
+  it("rejects odd-length bytes", () => {
+    const entry = parseAbi(scalarAbi("bytes"))[0];
+    expect(() => encodeCall(scalarAbi("bytes"), entry, ["0x123"])).toThrow(FieldError);
   });
 });
