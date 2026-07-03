@@ -52,6 +52,7 @@ const App = () => {
 
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(false);
+  const [copyNotice, setCopyNotice] = useState("");
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.key === selectedKey),
@@ -61,6 +62,19 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, apiKey);
   }, [apiKey]);
+
+  useEffect(() => {
+    if (!copyNotice) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setCopyNotice(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copyNotice]);
+
+  const handleCopy = async (value: string, label: string) => {
+    await navigator.clipboard.writeText(value);
+    setCopyNotice(label);
+  };
 
   const selectEntry = (entry: FunctionEntry) => {
     setSelectedKey(entry.key);
@@ -181,6 +195,9 @@ const App = () => {
 
   return (
     <div className="shell compact-shell">
+      <div className="glow glow-a" />
+      <div className="glow glow-b" />
+
       <header className="hero compact-hero">
         <div className="hero-copy-block">
           <p className="eyebrow">Safe Ops</p>
@@ -230,15 +247,15 @@ const App = () => {
               />
             </label>
             <div className="field">
-              <span>&nbsp;</span>
-              <div style={{ display: "flex", gap: 8 }}>
+              <span>Fetch from explorer</span>
+              <div className="field-actions">
                 <button
                   type="button"
                   className="mini-button"
                   disabled={fetching}
                   onClick={handleFetch}
                 >
-                  {fetching ? "Fetching..." : "Fetch ABI"}
+                  {fetching ? "Fetching…" : "Fetch ABI"}
                 </button>
                 <button
                   type="button"
@@ -443,12 +460,14 @@ const App = () => {
                 title={tlEnabled ? "Inner calldata" : "Direct calldata"}
                 target={address || "target contract"}
                 calldata={innerCalldata}
+                onCopy={handleCopy}
               />
               {tlEnabled ? (
                 <OutputCard
                   title={`Outer ${tlAction} calldata`}
                   target={tlAddress || "timelock"}
                   calldata={outerCalldata}
+                  onCopy={handleCopy}
                 />
               ) : null}
             </div>
@@ -472,6 +491,8 @@ const App = () => {
           )}
         </section>
       </main>
+
+      {copyNotice ? <div className="copy-toast">{copyNotice}</div> : null}
     </div>
   );
 };
@@ -480,10 +501,12 @@ const OutputCard = ({
   title,
   target,
   calldata,
+  onCopy,
 }: {
   title: string;
   target: string;
   calldata: string;
+  onCopy: (value: string, label: string) => Promise<void>;
 }) => (
   <div className="output-card compact-output">
     <div className="output-head">
@@ -500,8 +523,9 @@ const OutputCard = ({
           <button
             type="button"
             className="mini-button icon-button"
-            onClick={() => navigator.clipboard.writeText(calldata)}
+            onClick={() => onCopy(calldata, "Calldata copied")}
           >
+            <CopyIcon />
             Copy
           </button>
         ) : null}
@@ -509,6 +533,28 @@ const OutputCard = ({
       <pre>{calldata || "Fill the form and generate calldata."}</pre>
     </div>
   </div>
+);
+
+const CopyIcon = () => (
+  <svg
+    aria-hidden="true"
+    className="copy-icon"
+    viewBox="0 0 16 16"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M5.5 2.5H11.5C12.0523 2.5 12.5 2.94772 12.5 3.5V11.5C12.5 12.0523 12.0523 12.5 11.5 12.5H5.5C4.94772 12.5 4.5 12.0523 4.5 11.5V3.5C4.5 2.94772 4.94772 2.5 5.5 2.5Z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
+    <path
+      d="M3.5 10.5H3C2.44772 10.5 2 10.0523 2 9.5V2.99999C2 2.44771 2.44772 1.99999 3 1.99999H9.5C10.0523 1.99999 10.5 2.44771 10.5 2.99999V3.5"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+    />
+  </svg>
 );
 
 const DecodedRows = ({ rows }: { rows: Array<{ label: string; value: string }> }) => {
