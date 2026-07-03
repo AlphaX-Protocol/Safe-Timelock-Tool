@@ -113,3 +113,26 @@ describe("validation", () => {
     expect(() => encodeCall(scalarAbi("bytes"), entry, ["0x123"])).toThrow(FieldError);
   });
 });
+
+import { decodeToRows } from "./abi-form";
+
+describe("decodeToRows", () => {
+  it("decodes tuple[] + uint256 into labeled string rows", () => {
+    const entry = parseAbi(validatorsAbi)[0];
+    const data = encodeCall(validatorsAbi, entry, [
+      [{ signer: A1, power: "10" }],
+      "30",
+    ] as never);
+    const rows = decodeToRows(validatorsAbi, entry, data);
+    expect(rows[0].label).toBe("validators (tuple[])");
+    expect(rows[1].label).toBe("requiredPower (uint256)");
+    expect(rows[1].value).toBe("30");
+    expect(rows[0].value).toContain(A1);
+    expect(rows[0].value).toContain("10");
+  });
+
+  it("throws when calldata selector does not match the function", () => {
+    const entry = parseAbi(scalarAbi("uint256"))[0];
+    expect(() => decodeToRows(scalarAbi("uint256"), entry, "0xdeadbeef")).toThrow();
+  });
+});

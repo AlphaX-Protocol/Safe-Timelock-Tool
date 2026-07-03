@@ -165,3 +165,48 @@ export const encodeCall = (
   );
   return iface.encodeFunctionData(entry.key, args);
 };
+
+export type DecodedRow = { label: string; value: string };
+
+const serializeDecoded = (value: unknown): unknown => {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeDecoded(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => Number.isNaN(Number(key)))
+        .map(([key, inner]) => [key, serializeDecoded(inner)]),
+    );
+  }
+  return value;
+};
+
+const formatDecoded = (value: unknown): string => {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(serializeDecoded(value), null, 2);
+};
+
+export const decodeToRows = (
+  abiJson: string,
+  entry: FunctionEntry,
+  calldata: string,
+): DecodedRow[] => {
+  const iface = new Interface(abiJson);
+  const decoded = iface.decodeFunctionData(entry.key, calldata.trim());
+  return entry.inputs.map((param, index) => ({
+    label: param.name ? `${param.name} (${param.type})` : param.type,
+    value: formatDecoded(decoded[index]),
+  }));
+};
