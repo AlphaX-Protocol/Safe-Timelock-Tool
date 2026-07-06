@@ -24,6 +24,13 @@ import { ParamField } from "./components/ParamField";
 
 const STORAGE_KEY = "safeTimelockExplorerApiKey";
 const defaultPreset = presets[0];
+// The explorer API key is configured out-of-band (build-time env var, or a
+// value stored by an earlier build) rather than shown in the UI.
+const EXPLORER_API_KEY =
+  (import.meta.env.VITE_EXPLORER_API_KEY as string | undefined) ??
+  (typeof localStorage !== "undefined"
+    ? localStorage.getItem(STORAGE_KEY) ?? ""
+    : "");
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -32,9 +39,6 @@ type ParamRow = { label: string; value: string };
 const App = () => {
   const [mode, setMode] = useState<"encode" | "decode">("encode");
   const [chainId, setChainId] = useState<number>(chains[0].chainId);
-  const [apiKey, setApiKey] = useState<string>(
-    () => localStorage.getItem(STORAGE_KEY) ?? "",
-  );
   const [address, setAddress] = useState("");
   const [abiText, setAbiText] = useState(defaultPreset?.abiJson ?? "");
   const [entries, setEntries] = useState<FunctionEntry[]>([]);
@@ -64,10 +68,6 @@ const App = () => {
     () => entries.find((entry) => entry.key === selectedKey),
     [entries, selectedKey],
   );
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, apiKey);
-  }, [apiKey]);
 
   useEffect(() => {
     if (!copyNotice) {
@@ -113,7 +113,7 @@ const App = () => {
   const handleFetch = async () => {
     setFetching(true);
     try {
-      const result = await fetchAbi(chainId, address, apiKey);
+      const result = await fetchAbi(chainId, address, EXPLORER_API_KEY);
       if (result.ok) {
         setAbiText(result.abi);
         loadAbi(result.abi);
@@ -315,35 +315,22 @@ const App = () => {
               This becomes the Timelock call's <code>target</code> argument.
             </small>
           </label>
-          <div className="field-grid compact">
-            <label className="field">
-              <span>Explorer API key</span>
-              <input
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="Etherscan v2 API key"
-              />
-            </label>
-            <div className="field">
-              <span>Fetch from explorer</span>
-              <div className="field-actions">
-                <button
-                  type="button"
-                  className="mini-button"
-                  disabled={fetching}
-                  onClick={handleFetch}
-                >
-                  {fetching ? "Fetching…" : "Fetch ABI"}
-                </button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() => setApiKey("")}
-                >
-                  Clear key
-                </button>
-              </div>
+          <div className="field">
+            <span>ABI source</span>
+            <div className="field-actions">
+              <button
+                type="button"
+                className="mini-button"
+                disabled={fetching}
+                onClick={handleFetch}
+              >
+                {fetching ? "Fetching…" : "Fetch ABI from explorer"}
+              </button>
             </div>
+            <small>
+              Uses the preset ABI by default; fetch to override from the block
+              explorer.
+            </small>
           </div>
         </section>
 
