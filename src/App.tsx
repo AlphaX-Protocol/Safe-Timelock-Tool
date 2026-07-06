@@ -77,8 +77,6 @@ const App = () => {
   const [tlDelay, setTlDelay] = useState("0");
   const [tlValue, setTlValue] = useState("0");
 
-  const [innerCalldata, setInnerCalldata] = useState("");
-
   const [decodeInput, setDecodeInput] = useState("");
   const [decodeWrapped, setDecodeWrapped] = useState(true);
   const [innerRows, setInnerRows] = useState<DecodedRow[]>([]);
@@ -127,7 +125,6 @@ const App = () => {
   const selectEntry = (entry: FunctionEntry) => {
     setSelectedKey(entry.key);
     setValues(entry.inputs.map((param) => buildInitialValue(param)));
-    setInnerCalldata("");
     setInnerRows([]);
     setOuterRows([]);
     setDecodedOpId("");
@@ -166,56 +163,59 @@ const App = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Step 2: encode the vault function call into calldata.
-  const handleGenerateVault = () => {
-    try {
-      if (!selectedEntry) {
-        throw new Error("Select a vault function first.");
-      }
-      const inner = encodeCall(abiText, selectedEntry, values);
-      setInnerCalldata(inner);
-      setError("");
-    } catch (caught) {
-      setError(
-        caught instanceof FieldError
-          ? `${caught.path}: ${caught.message}`
-          : errorText(caught),
-      );
+  // Step 2: the vault calldata is derived live from the selected function and
+  // its parameter values — no button. `error` holds the first encode problem
+  // (bad param) or "" when it encodes cleanly; empty params yield "".
+  const vaultCalldata = useMemo(() => {
+    if (mode !== "encode" || !selectedEntry) {
+      return { data: "", error: "" };
     }
-  };
+    try {
+      return { data: encodeCall(abiText, selectedEntry, values), error: "" };
+    } catch (caught) {
+      return {
+        data: "",
+        error:
+          caught instanceof FieldError
+            ? `${caught.path}: ${caught.message}`
+            : errorText(caught),
+      };
+    }
+  }, [mode, selectedEntry, abiText, values]);
 
-  // Step 3: derive the Timelock schedule/execute arguments from the vault
-  // calldata. Recomputed live so editing salt/delay/etc. updates immediately.
-  // The Timelock argument `target` is the vault address; the Timelock contract
-  // itself is the Safe transaction's "To", not an encoded argument.
+  // Step 3: derive the Timelock schedule/execute arguments live from the vault
+  // calldata. `target` is the vault address and `data` is the vault calldata —
+  // both auto-filled; value/predecessor/salt/delay come from the inputs. The
+  // Timelock contract itself is the Safe "To", not an encoded argument.
   const timelockOutput = useMemo(() => {
-    if (mode !== "encode" || !innerCalldata) {
+    if (mode !== "encode") {
       return null;
     }
-    if (!isAddress(address)) {
-      return { error: "Enter a valid vault address in step 1.", params: [] as ParamRow[], outer: "", opId: "" };
+    const data = vaultCalldata.data;
+    const params: ParamRow[] = [
+      { label: "target", value: isAddress(address) ? address : "" },
+      { label: "value", value: tlValue },
+      { label: "data", value: data },
+      { label: "predecessor", value: tlPredecessor },
+      { label: "salt", value: tlSalt },
+    ];
+    if (tlAction === "schedule") {
+      params.push({ label: "delay", value: tlDelay });
+    }
+    if (!data || !isAddress(address)) {
+      return { params, outer: "", opId: "", error: "" };
     }
     try {
       const outer =
         tlAction === "schedule"
-          ? encodeSchedule(address, tlValue, innerCalldata, tlPredecessor, tlSalt, tlDelay)
-          : encodeExecute(address, tlValue, innerCalldata, tlPredecessor, tlSalt);
-      const opId = hashTimelockOperation(address, tlValue, innerCalldata, tlPredecessor, tlSalt);
-      const params: ParamRow[] = [
-        { label: "target", value: address },
-        { label: "value", value: tlValue },
-        { label: "data", value: innerCalldata },
-        { label: "predecessor", value: tlPredecessor },
-        { label: "salt", value: tlSalt },
-      ];
-      if (tlAction === "schedule") {
-        params.push({ label: "delay", value: tlDelay });
-      }
+          ? encodeSchedule(address, tlValue, data, tlPredecessor, tlSalt, tlDelay)
+          : encodeExecute(address, tlValue, data, tlPredecessor, tlSalt);
+      const opId = hashTimelockOperation(address, tlValue, data, tlPredecessor, tlSalt);
       return { outer, opId, params, error: "" };
     } catch (caught) {
-      return { outer: "", opId: "", params: [] as ParamRow[], error: errorText(caught) };
+      return { outer: "", opId: "", params, error: errorText(caught) };
     }
-  }, [mode, innerCalldata, address, tlAction, tlValue, tlPredecessor, tlSalt, tlDelay]);
+  }, [mode, vaultCalldata.data, address, tlAction, tlValue, tlPredecessor, tlSalt, tlDelay]);
 
   const handleDecode = () => {
     try {
@@ -428,17 +428,12 @@ const App = () => {
                   ))}
                 </div>
               ) : null}
-              <button
-                type="button"
-                className="primary-action compact-action"
-                onClick={handleGenerateVault}
-              >
-                Generate vault calldata
-              </button>
               <CopyableField
                 label="Vault calldata (data)"
-                value={innerCalldata}
-                emptyHint="Fill the parameters and generate."
+                value={vaultCalldata.data}
+                emptyHint={
+                  vaultCalldata.error || "Fill the parameters above."
+                }
                 onCopy={handleCopy}
               />
             </div>
@@ -463,7 +458,7 @@ const App = () => {
 
             <div className="timelock-box">
               <div className="timelock-header">
-                <h3>Timelock parameters</h3>
+                <h3>{tlAction}(…) parameters — paste into Safe</h3>
                 <div className="segmented">
                   <button
                     type="button"
@@ -481,91 +476,53 @@ const App = () => {
                   </button>
                 </div>
               </div>
-              <div className="field-grid compact">
-                <label className="field">
-                  <span>value (wei)</span>
-                  <input value={tlValue} onChange={(event) => setTlValue(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>predecessor</span>
-                  <input
-                    value={tlPredecessor}
-                    onChange={(event) => setTlPredecessor(event.target.value)}
-                    placeholder={ZERO_HASH}
-                  />
-                </label>
-                <label className="field">
-                  <span>salt</span>
-                  <input
-                    value={tlSalt}
-                    onChange={(event) => setTlSalt(event.target.value)}
-                    placeholder={ZERO_HASH}
-                  />
-                  <small>
-                    Identical for schedule and execute — a different salt (or
-                    predecessor/target/value/data) is a different operation and
-                    execute reverts.
-                  </small>
-                </label>
-                {tlAction === "schedule" ? (
-                  <label className="field">
-                    <span>delay (seconds)</span>
-                    <input value={tlDelay} onChange={(event) => setTlDelay(event.target.value)} />
-                    <small>Must be ≥ the Timelock's minDelay.</small>
-                  </label>
-                ) : null}
+
+              <div className="output-meta">
+                <span>To (Timelock contract)</span>
+                <code>{tlAddress || "enter the Timelock address in step 1"}</code>
               </div>
+
+              {/* Timelock function arguments, in ABI order. target and data are
+                  auto-filled (read-only); the rest are editable inputs. */}
+              <TimelockArgField label="target" type="address" value={address} auto readOnly
+                hint="Auto — the vault address from step 1." onCopy={handleCopy} />
+              <TimelockArgField label="value" type="uint256" value={tlValue}
+                onChange={setTlValue} onCopy={handleCopy} />
+              <TimelockArgField label="data" type="bytes" value={vaultCalldata.data} auto readOnly
+                hint={vaultCalldata.error || "Auto — the vault calldata from step 2."}
+                onCopy={handleCopy} />
+              <TimelockArgField label="predecessor" type="bytes32" value={tlPredecessor}
+                onChange={setTlPredecessor} placeholder={ZERO_HASH} onCopy={handleCopy} />
+              <TimelockArgField label="salt" type="bytes32" value={tlSalt}
+                onChange={setTlSalt} placeholder={ZERO_HASH} onCopy={handleCopy}
+                hint="Identical for schedule and execute — a different salt (or predecessor/target/value/data) is a different operation and execute reverts." />
+              {tlAction === "schedule" ? (
+                <TimelockArgField label="delay" type="uint256" value={tlDelay}
+                  onChange={setTlDelay} onCopy={handleCopy}
+                  hint="Must be ≥ the Timelock's minDelay." />
+              ) : null}
             </div>
 
-            {!innerCalldata ? (
-              <p className="empty-state">
-                Generate the vault calldata in step 2 first — it fills the{" "}
-                <code>data</code> argument below.
-              </p>
-            ) : timelockOutput?.error ? (
+            {timelockOutput?.error ? (
               <p className="error-text">{timelockOutput.error}</p>
-            ) : timelockOutput ? (
-              <div className="result-layout">
-                <div className="output-card compact-output">
-                  <div className="output-head">
-                    <h4>{tlAction}(…) arguments — paste into Safe</h4>
-                    <p>One field at a time in the Transaction Builder.</p>
-                  </div>
-                  <div className="output-meta">
-                    <span>To (Timelock contract)</span>
-                    <code>{tlAddress || "enter the Timelock address above"}</code>
-                  </div>
-                  <div className="tl-params">
-                    {timelockOutput.params.map((param) => (
-                      <CopyableField
-                        key={param.label}
-                        label={param.label}
-                        value={param.value}
-                        onCopy={handleCopy}
-                        mono
-                      />
-                    ))}
-                  </div>
+            ) : timelockOutput?.outer ? (
+              <div className="output-card compact-output">
+                <div className="output-head">
+                  <h4>Full {tlAction} calldata</h4>
+                  <p>Alternative: paste one blob as raw hex data.</p>
                 </div>
-
-                <div className="output-card compact-output">
-                  <div className="output-head">
-                    <h4>Full {tlAction} calldata</h4>
-                    <p>Alternative: paste one blob as raw hex data.</p>
-                  </div>
-                  <CopyableField
-                    label="calldata"
-                    value={timelockOutput.outer}
-                    onCopy={handleCopy}
-                  />
-                  <div className="op-id-row">
-                    <span>Operation ID</span>
-                    <code>{timelockOutput.opId}</code>
-                    <small>
-                      Independent of delay. The paired execute must reproduce
-                      this exact ID or it reverts.
-                    </small>
-                  </div>
+                <CopyableField
+                  label="calldata"
+                  value={timelockOutput.outer}
+                  onCopy={handleCopy}
+                />
+                <div className="op-id-row">
+                  <span>Operation ID</span>
+                  <code>{timelockOutput.opId}</code>
+                  <small>
+                    Independent of delay. The paired execute must reproduce
+                    this exact ID or it reverts.
+                  </small>
                 </div>
               </div>
             ) : null}
@@ -657,6 +614,60 @@ const App = () => {
     </div>
   );
 };
+
+// One Timelock function argument, rendered in ABI order. When `auto`, the
+// value is filled by the tool and shown read-only (target, data); otherwise it
+// is an editable input the user fills. Each row is copyable for Safe.
+const TimelockArgField = ({
+  label,
+  type,
+  value,
+  auto,
+  readOnly,
+  placeholder,
+  hint,
+  onChange,
+  onCopy,
+}: {
+  label: string;
+  type: string;
+  value: string;
+  auto?: boolean;
+  readOnly?: boolean;
+  placeholder?: string;
+  hint?: string;
+  onChange?: (next: string) => void;
+  onCopy: (value: string, label: string) => Promise<void>;
+}) => (
+  <label className="tl-arg field field-full">
+    <div className="meta-head">
+      <span>
+        {label} <em className="tl-arg-type">{type}</em>
+        {auto ? <em className="tl-arg-badge">auto</em> : null}
+      </span>
+      {value ? (
+        <button
+          type="button"
+          className="mini-button icon-button"
+          onClick={() => onCopy(value, `${label} copied`)}
+        >
+          <CopyIcon />
+          Copy
+        </button>
+      ) : null}
+    </div>
+    {readOnly ? (
+      <pre className="tl-arg-readonly">{value || hint || "—"}</pre>
+    ) : (
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange?.(event.target.value)}
+      />
+    )}
+    {hint && !readOnly ? <small>{hint}</small> : null}
+  </label>
+);
 
 const CopyableField = ({
   label,

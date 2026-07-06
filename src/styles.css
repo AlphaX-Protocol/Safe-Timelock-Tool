@@ -425,6 +425,46 @@ pre {
   color: var(--accent-2);
 }
 
+.tl-arg {
+  margin-top: 10px;
+}
+
+.tl-arg .meta-head span {
+  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  font-size: 0.85rem;
+  color: var(--accent-2);
+}
+
+.tl-arg-type {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tl-arg-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(240, 163, 58, 0.16);
+  color: #ffd7a0;
+}
+
+.tl-arg-readonly {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(246, 243, 234, 0.08);
+  background: rgba(5, 9, 13, 0.82);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .op-id-row {
   display: grid;
   gap: 6px;
