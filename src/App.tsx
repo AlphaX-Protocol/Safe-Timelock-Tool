@@ -288,6 +288,18 @@ const App = () => {
               This becomes the Timelock call's <code>target</code> argument.
             </small>
           </label>
+          <label className="field field-full">
+            <span>Timelock contract (Safe → To)</span>
+            <input
+              value={tlAddress}
+              onChange={(event) => setTlAddress(event.target.value)}
+              placeholder="0x…"
+            />
+            <small>
+              Not an argument — this is the Safe transaction target for the
+              schedule / execute call.
+            </small>
+          </label>
         </section>
 
         {/* Section 2: vault ABI & function */}
@@ -418,15 +430,6 @@ const App = () => {
                 </div>
               </div>
               <div className="field-grid compact">
-                <label className="field">
-                  <span>Timelock contract (Safe → To)</span>
-                  <input
-                    value={tlAddress}
-                    onChange={(event) => setTlAddress(event.target.value)}
-                    placeholder="0x…"
-                  />
-                  <small>Not an argument — this is the Safe transaction target.</small>
-                </label>
                 <label className="field">
                   <span>value (wei)</span>
                   <input value={tlValue} onChange={(event) => setTlValue(event.target.value)} />
