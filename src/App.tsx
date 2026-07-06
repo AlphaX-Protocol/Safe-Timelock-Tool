@@ -27,17 +27,51 @@ const errorText = (error: unknown): string =>
 
 type ParamRow = { label: string; value: string };
 
+// Per-chain memory of the last-used vault and timelock addresses.
+const ADDRESS_BOOK_KEY = "safeTimelockAddressBook";
+type ChainAddresses = { vault: string; timelock: string };
+type AddressBook = Record<string, ChainAddresses>;
+
+const readAddressBook = (): AddressBook => {
+  try {
+    const raw = localStorage.getItem(ADDRESS_BOOK_KEY);
+    return raw ? (JSON.parse(raw) as AddressBook) : {};
+  } catch {
+    return {};
+  }
+};
+
+const addressesForChain = (chainId: number): ChainAddresses =>
+  readAddressBook()[String(chainId)] ?? { vault: "", timelock: "" };
+
+const rememberAddresses = (
+  chainId: number,
+  addresses: ChainAddresses,
+): void => {
+  try {
+    const book = readAddressBook();
+    book[String(chainId)] = addresses;
+    localStorage.setItem(ADDRESS_BOOK_KEY, JSON.stringify(book));
+  } catch {
+    // ignore storage failures (private mode, quota) — memory is best-effort
+  }
+};
+
 const App = () => {
   const [mode, setMode] = useState<"encode" | "decode">("encode");
   const [chainId, setChainId] = useState<number>(chains[0].chainId);
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState(
+    () => addressesForChain(chains[0].chainId).vault,
+  );
   const [abiText, setAbiText] = useState(defaultPreset?.abiJson ?? "");
   const [entries, setEntries] = useState<FunctionEntry[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [values, setValues] = useState<FormValue[]>([]);
 
   const [tlAction, setTlAction] = useState<"schedule" | "execute">("schedule");
-  const [tlAddress, setTlAddress] = useState("");
+  const [tlAddress, setTlAddress] = useState(
+    () => addressesForChain(chains[0].chainId).timelock,
+  );
   const [tlPredecessor, setTlPredecessor] = useState(ZERO_HASH);
   const [tlSalt, setTlSalt] = useState(ZERO_HASH);
   const [tlDelay, setTlDelay] = useState("0");
@@ -70,6 +104,24 @@ const App = () => {
   const handleCopy = async (value: string, label: string) => {
     await navigator.clipboard.writeText(value);
     setCopyNotice(label);
+  };
+
+  // Switch chains, loading that chain's remembered addresses.
+  const handleSelectChain = (nextChainId: number) => {
+    setChainId(nextChainId);
+    const stored = addressesForChain(nextChainId);
+    setAddress(stored.vault);
+    setTlAddress(stored.timelock);
+  };
+
+  const handleVaultAddressChange = (next: string) => {
+    setAddress(next);
+    rememberAddresses(chainId, { vault: next, timelock: tlAddress });
+  };
+
+  const handleTimelockAddressChange = (next: string) => {
+    setTlAddress(next);
+    rememberAddresses(chainId, { vault: address, timelock: next });
   };
 
   const selectEntry = (entry: FunctionEntry) => {
@@ -270,7 +322,7 @@ const App = () => {
                 key={item.id}
                 type="button"
                 className={`chain-chip ${item.chainId === chainId ? "active" : ""}`}
-                onClick={() => setChainId(item.chainId)}
+                onClick={() => handleSelectChain(item.chainId)}
               >
                 <strong>{item.name}</strong>
                 <small>Chain ID {item.chainId}</small>
@@ -281,7 +333,7 @@ const App = () => {
             <span>Vault address</span>
             <input
               value={address}
-              onChange={(event) => setAddress(event.target.value)}
+              onChange={(event) => handleVaultAddressChange(event.target.value)}
               placeholder="0x… (the contract the Timelock will call)"
             />
             <small>
@@ -292,7 +344,7 @@ const App = () => {
             <span>Timelock contract (Safe → To)</span>
             <input
               value={tlAddress}
-              onChange={(event) => setTlAddress(event.target.value)}
+              onChange={(event) => handleTimelockAddressChange(event.target.value)}
               placeholder="0x…"
             />
             <small>
