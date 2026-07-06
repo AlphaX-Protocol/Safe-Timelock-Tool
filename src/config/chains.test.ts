@@ -8,8 +8,9 @@ describe("chains", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("includes Ethereum mainnet and Arbitrum One", () => {
-    expect(chains.some((c) => c.chainId === 1)).toBe(true);
-    expect(chains.some((c) => c.chainId === 42161)).toBe(true);
+  it("includes exactly Ethereum, Arbitrum One, and BSC", () => {
+    expect(chains.map((c) => c.chainId).sort((a, b) => a - b)).toEqual([
+      1, 56, 42161,
+    ]);
   });
 });
