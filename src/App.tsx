@@ -336,9 +336,6 @@ const App = () => {
               onChange={(event) => handleVaultAddressChange(event.target.value)}
               placeholder="0x… (the contract the Timelock will call)"
             />
-            <small>
-              This becomes the Timelock call's <code>target</code> argument.
-            </small>
           </label>
           <label className="field field-full">
             <span>Timelock contract (Safe → To)</span>
