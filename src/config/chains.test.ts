@@ -8,9 +8,9 @@ describe("chains", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("includes exactly Ethereum, Arbitrum One, and BSC", () => {
+  it("includes exactly Ethereum, Arbitrum One, BSC, and Ethereum Sepolia", () => {
     expect(chains.map((c) => c.chainId).sort((a, b) => a - b)).toEqual([
-      1, 56, 42161,
+      1, 56, 42161, 11155111,
     ]);
   });
 });
