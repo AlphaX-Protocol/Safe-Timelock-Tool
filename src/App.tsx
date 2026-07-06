@@ -18,19 +18,10 @@ import {
   encodeSchedule,
   hashTimelockOperation,
 } from "./lib/timelock";
-import { fetchAbi } from "./lib/explorer";
 import { presets } from "./config/presets";
 import { ParamField } from "./components/ParamField";
 
-const STORAGE_KEY = "safeTimelockExplorerApiKey";
 const defaultPreset = presets[0];
-// The explorer API key is configured out-of-band (build-time env var, or a
-// value stored by an earlier build) rather than shown in the UI.
-const EXPLORER_API_KEY =
-  (import.meta.env.VITE_EXPLORER_API_KEY as string | undefined) ??
-  (typeof localStorage !== "undefined"
-    ? localStorage.getItem(STORAGE_KEY) ?? ""
-    : "");
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -61,7 +52,6 @@ const App = () => {
   const [decodedOpId, setDecodedOpId] = useState("");
 
   const [error, setError] = useState("");
-  const [fetching, setFetching] = useState(false);
   const [copyNotice, setCopyNotice] = useState("");
 
   const selectedEntry = useMemo(
@@ -107,23 +97,6 @@ const App = () => {
       setEntries([]);
       setSelectedKey("");
       setError(`Invalid ABI: ${errorText(caught)}`);
-    }
-  };
-
-  const handleFetch = async () => {
-    setFetching(true);
-    try {
-      const result = await fetchAbi(chainId, address, EXPLORER_API_KEY);
-      if (result.ok) {
-        setAbiText(result.abi);
-        loadAbi(result.abi);
-      } else {
-        setError(result.error);
-      }
-    } catch (caught) {
-      setError(errorText(caught));
-    } finally {
-      setFetching(false);
     }
   };
 
@@ -289,7 +262,7 @@ const App = () => {
         <section className="panel flow-panel">
           <div className="section-heading">
             <h2>1. Chain &amp; vault</h2>
-            <p>Chain selects the explorer endpoint. Enter the vault address.</p>
+            <p>Select the network and enter the vault address.</p>
           </div>
           <div className="chain-list">
             {chains.map((item) => (
@@ -315,23 +288,6 @@ const App = () => {
               This becomes the Timelock call's <code>target</code> argument.
             </small>
           </label>
-          <div className="field">
-            <span>ABI source</span>
-            <div className="field-actions">
-              <button
-                type="button"
-                className="mini-button"
-                disabled={fetching}
-                onClick={handleFetch}
-              >
-                {fetching ? "Fetching…" : "Fetch ABI from explorer"}
-              </button>
-            </div>
-            <small>
-              Uses the preset ABI by default; fetch to override from the block
-              explorer.
-            </small>
-          </div>
         </section>
 
         {/* Section 2: vault ABI & function */}
@@ -340,8 +296,8 @@ const App = () => {
             <h2>2. Vault ABI &amp; function</h2>
             <p>
               A bundled preset is loaded by default. Pick another preset, or
-              paste / fetch an ABI to override it. Then choose a function and
-              fill its parameters.
+              paste an ABI to override it. Then choose a function and fill its
+              parameters.
             </p>
           </div>
           {presets.length > 0 ? (
